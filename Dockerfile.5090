@@ -1,34 +1,21 @@
-FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
-# System deps: Python, pip, git, curl, basic tools
+# Install system deps
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       python3 python3-venv python3-dev python3-pip \
-      git \
-      curl \
-      ca-certificates \
-      openssh-server \
-      nano \
-      htop \
-      tmux \
-      net-tools \
-      iputils-ping \
-      procps \
+      git curl ca-certificates nano htop tmux net-tools iputils-ping procps \
     && rm -rf /var/lib/apt/lists/*
 
-# Optional: configure SSH root login (remove if you don't need SSH)
-RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
-    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
-    mkdir -p /run/sshd && \
-    rm -f /etc/ssh/ssh_host_*
+# Create non-root user early
+RUN useradd -m comfy && \
+    mkdir -p /workspace/runpod-slim && \
+    chown -R comfy:comfy /workspace
 
-# Upgrade pip
-RUN python3 -m pip install --no-cache-dir --upgrade pip
-
-# Workdir
+USER comfy
 WORKDIR /workspace/runpod-slim
 
 # Clone ComfyUI
@@ -36,13 +23,14 @@ RUN git clone https://github.com/comfyanonymous/ComfyUI.git ComfyUI
 
 WORKDIR /workspace/runpod-slim/ComfyUI
 
-# Install PyTorch (CUDA 12.1) + ComfyUI deps
-RUN python3 -m pip install --no-cache-dir \
+# Install PyTorch + deps
+RUN python3 -m pip install --no-cache-dir --upgrade pip && \
+    python3 -m pip install --no-cache-dir \
       torch torchvision torchaudio \
-      --index-url https://download.pytorch.org/whl/cu128 && \
+      --index-url https://download.pytorch.org/whl/cu124 && \
     python3 -m pip install --no-cache-dir -r requirements.txt
 
-# (Optional) install a couple of custom nodes you care about
+# Custom nodes
 RUN git clone https://github.com/ltdrdata/ComfyUI-Manager.git custom_nodes/ComfyUI-Manager && \
     git clone https://github.com/kijai/ComfyUI-KJNodes custom_nodes/ComfyUI-KJNodes && \
     python3 -m pip install --no-cache-dir \
@@ -50,19 +38,24 @@ RUN git clone https://github.com/ltdrdata/ComfyUI-Manager.git custom_nodes/Comfy
     python3 -m pip install --no-cache-dir \
       -r custom_nodes/ComfyUI-KJNodes/requirements.txt || true
 
-# Create checkpoints dir
-RUN mkdir -p /workspace/runpod-slim/ComfyUI/models/checkpoints
+# Create standard model dirs
+RUN mkdir -p models/checkpoints models/vae models/clip models/loras
 
-# Copy entrypoint and start script
-COPY start.5090.sh /start.sh
+# Copy entrypoint & start script
 COPY entrypoint_download_ckpt.sh /entrypoint_download_ckpt.sh
-RUN chmod +x /start.sh /entrypoint_download_ckpt.sh
+COPY start.sh /start.sh
+RUN chmod +x /entrypoint_download_ckpt.sh /start.sh
 
-# Default env (overridden by RunPod template)
+# Default env vars
 ENV CHECKPOINT_ID=""
 ENV CIVITAI_API_KEY=""
+ENV ENABLE_SSH="false"
 
-# Expose ComfyUI + SSH (optional)
+# Healthcheck (helps serverless know when ready)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
+  CMD curl -f http://localhost:8188 || exit 1
+
 EXPOSE 8188 22
 
 ENTRYPOINT ["/entrypoint_download_ckpt.sh"]
+CMD ["--listen", "0.0.0.0", "--port", "8188"]
