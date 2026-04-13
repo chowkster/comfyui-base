@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail   # -u treats unset variables as error, -o pipefail catches pipeline failures
 
-CKPT_DIR="/workspace/runpod-slim/ComfyUI/models/checkpoints"
+CKPT_DIR="/workspace/ComfyUI/models/checkpoints"
 mkdir -p "$CKPT_DIR"
 
 if [ -n "${CHECKPOINT_ID:-}" ]; then
